@@ -59,7 +59,8 @@ pub fn decompress_to_vec(
     src: &[u8],
     uncompressed_size: NonZeroU64,
 ) -> Result<Vec<u8>, DecompressionError> {
-    let mut dst = vec![0; uncompressed_size.get() as _];
+    let mut dst = Vec::with_capacity(uncompressed_size.get() as _);
+    unsafe { dst.set_len(uncompressed_size.get() as _) };
     decompess_impl(src, &mut dst, uncompressed_size)?;
     Ok(dst)
 }

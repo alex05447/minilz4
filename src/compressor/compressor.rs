@@ -77,10 +77,9 @@ impl Compressor {
     /// - Returns [`CompressionError`](CompressorError::CompressionError) if the LZ4 compression failed for some reason.
     pub fn compress(&mut self, src: &[u8], dst: &mut [u8]) -> Result<NonZeroU64, CompressorError> {
         // Input must be non-empty.
-        let uncompressed_size =
+        let src_size =
             NonZeroU64::new(src.len() as _).ok_or_else(|| CompressorError::EmptyInput)?;
-        let (num_blocks, block_size) = calc_num_blocks_and_block_size(uncompressed_size);
-        self.compress_impl(src, uncompressed_size, dst, num_blocks, block_size)
+        self.compress_non_empty_input(src, src_size, dst)
     }
 
     /// Tries to compress the (non-empty) `src` buffer into a `Vec<u8>`.
@@ -95,20 +94,42 @@ impl Compressor {
     /// - Returns [`EmptyInput`](CompressorError::EmptyInput) if the `src` buffer is empty.
     /// - Returns [`CompressionError`](CompressorError::CompressionError) if the LZ4 compression failed for some reason.
     pub fn compress_to_vec(&mut self, src: &[u8]) -> Result<Vec<u8>, CompressorError> {
+        let mut dst = Vec::new();
+        self.compress_into_vec(src, &mut dst, /* shrink_to_fit */ true)?;
+        Ok(dst)
+    }
+
+    /// Tries to compress the (non-empty) `src` buffer into a provided `Vec<u8>`.
+    ///
+    /// Created compressed buffer does not keep track of its original uncompressed size, so that information must be stored separately.
+    ///
+    /// NOTE: the produced compressed data is meant to be decompressed only with [`decompress()`] / [`decompress_to_vec`]
+    /// and is not meant to be passed to any other LZ4 decompression implementations.
+    ///
+    /// # Errors
+    ///
+    /// - Returns [`EmptyInput`](CompressorError::EmptyInput) if the `src` buffer is empty.
+    /// - Returns [`CompressionError`](CompressorError::CompressionError) if the LZ4 compression failed for some reason.
+    pub fn compress_into_vec(
+        &mut self,
+        src: &[u8],
+        dst: &mut Vec<u8>,
+        shrink_to_fit: bool,
+    ) -> Result<(), CompressorError> {
         // Input must be non-empty.
-        let mut dst = vec![
-            0;
-            Self::compressed_size_bound(
-                NonZeroU64::new(src.len() as _).ok_or(CompressorError::EmptyInput)?
-            )
-            .get() as _
-        ];
-        let compressed_size = self.compress(src, &mut dst)?;
+        let src_size = NonZeroU64::new(src.len() as _).ok_or(CompressorError::EmptyInput)?;
+        let bound = Self::compressed_size_bound(src_size).get() as _;
+        dst.clear();
+        dst.reserve(bound);
+        unsafe { dst.set_len(bound) };
+        let compressed_size = self.compress_non_empty_input(src, src_size, dst)?;
         unsafe {
             dst.set_len(compressed_size.get() as _);
         }
-        dst.shrink_to_fit();
-        Ok(dst)
+        if shrink_to_fit {
+            dst.shrink_to_fit();
+        }
+        Ok(())
     }
 
     /// Compresses the `src` buffer as a single block into the `dst` buffer.
@@ -260,6 +281,18 @@ impl Compressor {
 
         debug_assert!(bound > 0);
         unsafe { NonZeroU64::new_unchecked(bound) }
+    }
+
+    /// The caller guarantees the `src` buffer is not empty and that `src_size == src.len()`.
+    fn compress_non_empty_input(
+        &mut self,
+        src: &[u8],
+        src_size: NonZeroU64,
+        dst: &mut [u8],
+    ) -> Result<NonZeroU64, CompressorError> {
+        debug_assert_eq!(src.len() as u64, src_size.get());
+        let (num_blocks, block_size) = calc_num_blocks_and_block_size(src_size);
+        self.compress_impl(src, src_size, dst, num_blocks, block_size)
     }
 
     /// The caller guarantees the `src` buffer is not empty and that `src_size == src.len()`.
