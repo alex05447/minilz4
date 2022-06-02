@@ -36,7 +36,7 @@ pub fn decompress(src: &[u8], dst: &mut [u8]) -> Result<(), DecompressionError> 
     decompess_impl(src, dst, dst_size)
 }
 
-/// Tries to decompress the (non-empty) `src` buffer, filled by the [`Compressor`] into a `Vec<u8>`.
+/// Tries to decompress the (non-empty) `src` buffer, filled by the [`Compressor`] into an allocated `Vec<u8>`.
 /// `uncompressed_size` must be exactly equal to the original, uncompressed size of the `src` data.
 ///
 /// On success the returned vector is guaranteed to be exactly `uncompressed_size` bytes long.
@@ -53,7 +53,6 @@ pub fn decompress(src: &[u8], dst: &mut [u8]) -> Result<(), DecompressionError> 
 /// The function effectively relies entirely on the C LZ4 library to gracefully handle garbage/malicious inputs.
 ///
 /// [`EmptyInput`]: enum.DecompressionError.html#variant.EmptyInput
-/// [`EmptyOutput`]: enum.DecompressionError.html#variant.EmptyOutput
 /// [`DecompressionError`]: enum.DecompressionError.html#variant.DecompressionError
 pub fn decompress_to_vec(
     src: &[u8],
@@ -63,6 +62,35 @@ pub fn decompress_to_vec(
     unsafe { dst.set_len(uncompressed_size.get() as _) };
     decompess_impl(src, &mut dst, uncompressed_size)?;
     Ok(dst)
+}
+
+/// Tries to decompress the (non-empty) `src` buffer, filled by the [`Compressor`] into a provided `dst` vector.
+/// `uncompressed_size` must be exactly equal to the original, uncompressed size of the `src` data.
+///
+/// On success the vector is guaranteed to be exactly `uncompressed_size` bytes long.
+///
+/// # Errors
+///
+/// Returns [`EmptyInput`] if the `src` buffer is empty.
+/// Returns [`DecompressionError`] if the LZ4 decompression failed for some reason - e.g.
+/// if `src` buffer is not a valid LZ4-compressed buffer returned by [`Compressor::compress()`],
+/// or if `uncompressed_size` is not exactly equal to the original, uncompressed size of the `src` data.
+///
+/// # Safety
+///
+/// The function effectively relies entirely on the C LZ4 library to gracefully handle garbage/malicious inputs.
+///
+/// [`EmptyInput`]: enum.DecompressionError.html#variant.EmptyInput
+/// [`DecompressionError`]: enum.DecompressionError.html#variant.DecompressionError
+pub fn decompress_into_vec(
+    src: &[u8],
+    uncompressed_size: NonZeroU64,
+    dst: &mut Vec<u8>,
+) -> Result<(), DecompressionError> {
+    dst.clear();
+    dst.reserve(uncompressed_size.get() as _);
+    unsafe { dst.set_len(uncompressed_size.get() as _) };
+    decompess_impl(src, dst, uncompressed_size)
 }
 
 /// The caller guarantees `dst.len() as u64 == dst_size.get()`.
